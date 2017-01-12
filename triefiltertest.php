@@ -1,4 +1,27 @@
 <?php
+
+ini_set('display_errors', 1);
+
+$resTrie = trie_filter_init('words.dic');
+if (!$resTrie) {
+    die('create trie failed');
+}
+
+$str = 'hello, fuck';
+$arrRet = trie_filter_search($resTrie, $str);
+print_r($arrRet);
+echo "\n=================\n";
+
+$resTrieA = trie_filter_init('words.dic');
+if (!$resTrieA) {
+    die('create trie failed');
+}
+$arrRetA = trie_filter_search($resTrieA, $str);
+print_r($arrRetA);
+echo "\n=================\n";
+
+exit;
+
 ini_set('display_errors', 1);
 $arrWord = array('word', 'word1', 'word3', 'a', 'ab', 'abc', 'b');
 $resTrie = trie_filter_new(); //create an empty trie tree

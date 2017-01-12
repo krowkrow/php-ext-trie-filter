@@ -40,6 +40,10 @@ extern zend_module_entry trie_filter_module_entry;
 #define ALPHA_CHARSET	"UCS-4LE"
 #define PHP_TRIE_FILTER_RES_NAME "Trie tree filter"
 
+ZEND_BEGIN_MODULE_GLOBALS(trie_filter)
+	Trie *ptrie;
+ZEND_END_MODULE_GLOBALS(trie_filter)
+
 PHP_MINIT_FUNCTION(trie_filter);
 PHP_MSHUTDOWN_FUNCTION(trie_filter);
 PHP_RINIT_FUNCTION(trie_filter);
@@ -53,12 +57,15 @@ PHP_FUNCTION(trie_filter_new);
 PHP_FUNCTION(trie_filter_store);
 PHP_FUNCTION(trie_filter_save);
 PHP_FUNCTION(trie_filter_free);
+PHP_FUNCTION(trie_filter_init);
 
 #ifdef ZTS
 #define TRIE_FILTER_G(v) TSRMG(trie_filter_globals_id, zend_trie_filter_globals *, v)
 #else
 #define TRIE_FILTER_G(v) (trie_filter_globals.v)
 #endif
+
+ZEND_EXTERN_MODULE_GLOBALS(trie_filter);
 
 #endif	/* PHP_TRIE_FILTER_H */
 
