@@ -41,7 +41,9 @@ extern zend_module_entry trie_filter_module_entry;
 #define PHP_TRIE_FILTER_RES_NAME "Trie tree filter"
 
 ZEND_BEGIN_MODULE_GLOBALS(trie_filter)
-	Trie *ptrie;
+	Trie* pTrie;
+    int initNum;
+    int newNum;
 ZEND_END_MODULE_GLOBALS(trie_filter)
 
 PHP_MINIT_FUNCTION(trie_filter);
@@ -49,14 +51,9 @@ PHP_MSHUTDOWN_FUNCTION(trie_filter);
 PHP_RINIT_FUNCTION(trie_filter);
 PHP_RSHUTDOWN_FUNCTION(trie_filter);
 PHP_MINFO_FUNCTION(trie_filter);
+PHP_GINIT_FUNCTION(trie_filter);
 
-PHP_FUNCTION(trie_filter_load);
 PHP_FUNCTION(trie_filter_search);
-PHP_FUNCTION(trie_filter_search_all);
-PHP_FUNCTION(trie_filter_new);
-PHP_FUNCTION(trie_filter_store);
-PHP_FUNCTION(trie_filter_save);
-PHP_FUNCTION(trie_filter_free);
 PHP_FUNCTION(trie_filter_init);
 
 #ifdef ZTS
@@ -65,7 +62,7 @@ PHP_FUNCTION(trie_filter_init);
 #define TRIE_FILTER_G(v) (trie_filter_globals.v)
 #endif
 
-ZEND_EXTERN_MODULE_GLOBALS(trie_filter);
+extern ZEND_DECLARE_MODULE_GLOBALS(trie_filter);
 
 #endif	/* PHP_TRIE_FILTER_H */
 

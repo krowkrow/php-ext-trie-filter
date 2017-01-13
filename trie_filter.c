@@ -26,9 +26,7 @@
 #include "php_ini.h"
 #include "ext/standard/info.h"
 #include "php_trie_filter.h"
-
-/* True global resources - no need for thread safety here */
-static int le_trie_filter;
+//#include <stdio.h>
 
 ZEND_DECLARE_MODULE_GLOBALS(trie_filter);
 
@@ -37,13 +35,7 @@ ZEND_DECLARE_MODULE_GLOBALS(trie_filter);
  * Every user visible function must have an entry in trie_filter_functions[].
  */
 zend_function_entry trie_filter_functions[] = {
-	PHP_FE(trie_filter_load, NULL)
 	PHP_FE(trie_filter_search, NULL)
-    PHP_FE(trie_filter_search_all, NULL)
-    PHP_FE(trie_filter_new, NULL)
-    PHP_FE(trie_filter_store, NULL)
-    PHP_FE(trie_filter_save, NULL)
-    PHP_FE(trie_filter_free, NULL)
     PHP_FE(trie_filter_init, NULL)
 	{NULL, NULL, NULL}	/* Must be the last line in trie_filter_functions[] */
 };
@@ -60,7 +52,7 @@ zend_module_entry trie_filter_module_entry = {
 	PHP_MINIT(trie_filter),
 	PHP_MSHUTDOWN(trie_filter),
 	NULL,
-	NULL,
+	PHP_RSHUTDOWN(trie_filter),
 	PHP_MINFO(trie_filter),
 #if ZEND_MODULE_API_NO >= 20010901
 	"0.1", /* Replace with version number for your extension */
@@ -88,13 +80,20 @@ static void php_trie_filter_dtor(zend_resource *rsrc TSRMLS_DC)
 	trie_free(trie);
 }
 
+/* {{{ PHP_GINIT_FUNCTION
+*/
+PHP_GINIT_FUNCTION(trie_filter)
+{
+	trie_filter_globals->initNum = 0;
+    trie_filter_globals->newNum = 0;
+    trie_filter_globals->pTrie = NULL;
+}
+/* }}} */
+
 /* {{{ PHP_MINIT_FUNCTION
  */
 PHP_MINIT_FUNCTION(trie_filter)
-{
-	le_trie_filter = zend_register_list_destructors_ex(
-			php_trie_filter_dtor,
-			NULL, PHP_TRIE_FILTER_RES_NAME, module_number);
+{	
 	return SUCCESS;
 }
 /* }}} */
@@ -103,11 +102,19 @@ PHP_MINIT_FUNCTION(trie_filter)
  */
 PHP_MSHUTDOWN_FUNCTION(trie_filter)
 {
-    if(TRIE_FILTER_G(ptrie) != NULL) {
-        trie_free(TRIE_FILTER_G(ptrie));
-        TRIE_FILTER_G(ptrie) = NULL;
+    if (TRIE_FILTER_G(pTrie) != NULL) {
+        trie_free(TRIE_FILTER_G(pTrie));
     }
+    
 	return SUCCESS;
+}
+/* }}} */
+
+/* {{{ PHP_MSHUTDOWN_FUNCTION
+ */
+PHP_RSHUTDOWN_FUNCTION(trie_filter)
+{
+	return SUCCESS;    
 }
 /* }}} */
 
@@ -118,29 +125,6 @@ PHP_MINFO_FUNCTION(trie_filter)
 	php_info_print_table_start();
 	php_info_print_table_header(2, "trie_filter support", "enabled");
 	php_info_print_table_end();
-}
-/* }}} */
-
-/* {{{ proto resource trie_filter_load(string dict_file_path)
-   Returns resource id, or NULL on error*/
-PHP_FUNCTION(trie_filter_load)
-{
-	Trie *trie;
-	zend_string *path;
-
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S",
-				&path) == FAILURE) {
-		RETURN_NULL();
-	}
-
-	trie = trie_new_from_file(path->val);
-	if (!trie) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING,
-				"Unable to load %s", path->val);
-		RETURN_NULL();
-	}
-
-	RETURN_RES(zend_register_resource(trie, le_trie_filter));
 }
 /* }}} */
 
@@ -184,50 +168,10 @@ static int trie_search_one(Trie *trie, const AlphaChar *text, int *offset, TrieD
 	return 0;
 }
 
-static int trie_search_all(Trie *trie, const AlphaChar *text, zval *data)
-{
-	TrieState *s;
-	const AlphaChar *p;
-	const AlphaChar *base;
-    zval word;
-
-	base = text;
-    if (! (s = trie_root(trie))) {
-        return -1;
-    }
-
-    while (*text) {
-        p = text;
-        if(! trie_state_is_walkable(s, *p)) {
-            trie_state_rewind(s);
-            text++;
-            continue;
-        }
-
-        while(*p && trie_state_is_walkable(s, *p) && ! trie_state_is_leaf(s)) {
-            trie_state_walk(s, *p++);
-            if (trie_state_is_terminal(s)) {
-                // MAKE_STD_ZVAL(word);
-                array_init_size(&word, 3);
-                add_next_index_long(&word, text - base);
-                add_next_index_long(&word, p - text);
-                add_next_index_zval(data, &word);
-            }
-        }
-        trie_state_rewind(s);
-        text++;
-    }
-    trie_state_free(s);
-
-	return 0;
-}
-
-/* {{{ proto array trie_filter_search(int trie_tree_identifier, string centent)
+/* {{{ proto array trie_filter_search(string centent)
    Returns info about first keyword, or false on error*/
 PHP_FUNCTION(trie_filter_search)
 {
-	Trie *trie;
-	zval *trie_resource;
 	zend_string *text;
 
 	int offset = -1, i, ret;
@@ -235,8 +179,7 @@ PHP_FUNCTION(trie_filter_search)
 
 	AlphaChar *alpha_text;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rS",
-				&trie_resource, &text) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &text) == FAILURE) {
 		RETURN_FALSE;
 	}
 
@@ -245,7 +188,6 @@ PHP_FUNCTION(trie_filter_search)
 		php_error_docref(NULL TSRMLS_CC, E_NOTICE, "input is empty");
 		return;
 	}
-	trie = (Trie *) zend_fetch_resource(Z_RES_P(trie_resource), PHP_TRIE_FILTER_RES_NAME, le_trie_filter);
 
 	alpha_text = emalloc(sizeof(AlphaChar) * ((text->len) + 1));
 	for (i = 0; i < text->len; i++) {
@@ -254,7 +196,7 @@ PHP_FUNCTION(trie_filter_search)
 
 	alpha_text[text->len] = TRIE_CHAR_TERM;
 
-	ret = trie_search_one(trie, alpha_text, &offset, &length);
+	ret = trie_search_one(TRIE_FILTER_G(pTrie), alpha_text, &offset, &length);
     efree(alpha_text);
 	if (ret == 0) {
         return;
@@ -267,175 +209,33 @@ PHP_FUNCTION(trie_filter_search)
 }
 /* }}} */
 
-/* {{{ proto array trie_filter_search_all(int trie_tree_identifier, string centent)
-   Returns info about all keywords, or false on error*/
-PHP_FUNCTION(trie_filter_search_all)
-{
-	Trie *trie;
-	zval *trie_resource;
-	zend_string *text;
-
-	int i, ret;
-
-	AlphaChar *alpha_text;
-
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rS",
-				&trie_resource, &text) == FAILURE) {
-		RETURN_FALSE;
-	}
-
-    array_init(return_value);
-    if (text->len < 1) {
-		php_error_docref(NULL TSRMLS_CC, E_NOTICE, "input is empty");
-		return;
-	}
-
-	trie = (Trie *) zend_fetch_resource(Z_RES_P(trie_resource), PHP_TRIE_FILTER_RES_NAME, le_trie_filter);
-
-	alpha_text = emalloc(sizeof(AlphaChar) * (text->len + 1));
-
-	for (i = 0; i < text->len; i++) {
-		alpha_text[i] = (AlphaChar) ((unsigned char *) text->val)[i];
-	}
-
-	alpha_text[text->len] = TRIE_CHAR_TERM;
-
-	ret = trie_search_all(trie, alpha_text, return_value);
-    efree(alpha_text);
-	if (ret == 0) {
-        return;
-	} else {
-        RETURN_FALSE;
-    }
-}
-/* }}} */
-
-/* {{{ proto resource trie_filter_new()
-   Returns resource id, or NULL on error*/
-PHP_FUNCTION(trie_filter_new)
-{
-    Trie *trie;
-    AlphaMap *alpha_map;
-    int ret;
-
-    alpha_map = alpha_map_new();
-    if (! alpha_map) {
-        RETURN_NULL();
-    }
-
-    if (alpha_map_add_range(alpha_map, 0x00, 0xff) != 0) {
-        /* treat all strings as byte stream */
-        alpha_map_free(alpha_map);
-        RETURN_NULL();
-    }
-
-    trie = trie_new(alpha_map);
-    alpha_map_free(alpha_map);
-    if (! trie) {
-        RETURN_NULL();
-    }
-    RETURN_RES(zend_register_resource(trie, le_trie_filter));
-}
-/* }}} */
-
-#define KEYWORD_MAX_LEN 1024
-/* {{{ proto bool trie_filter_store(int trie_tree_identifier, string keyword)
-   Returns true, or false on error*/
-PHP_FUNCTION(trie_filter_store)
-{
-    Trie *trie;
-	zval *trie_resource;
-	zend_string *keyword;
-	unsigned char *p;
-	int i;
-    AlphaChar alpha_key[KEYWORD_MAX_LEN+1];
-
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rS",
-				&trie_resource, &keyword) == FAILURE) {
-		RETURN_FALSE;
-	}
-    if (keyword->len > KEYWORD_MAX_LEN || keyword->len < 1) {
-        php_error_docref(NULL TSRMLS_CC, E_WARNING, "keyword should has [1, %d] bytes", KEYWORD_MAX_LEN);
-        RETURN_FALSE;
-    }
-	trie = (Trie *) zend_fetch_resource(Z_RES_P(trie_resource), PHP_TRIE_FILTER_RES_NAME, le_trie_filter);
-    p = keyword->val;
-    i = 0;
-    while (*p && *p != '\n' && *p != '\r') {
-        alpha_key[i++] = (AlphaChar)*p;
-        p++;
-    }
-    alpha_key[i] = TRIE_CHAR_TERM;
-    if (! trie_store(trie, alpha_key, -1)) {
-        RETURN_FALSE;
-    }
-    RETURN_TRUE;
-}
-/* }}} */
-
-/* {{{ proto bool trie_filter_save(int trie_tree_identifier, string dict_path)
-   Returns true, or false on error*/
-PHP_FUNCTION(trie_filter_save)
-{
-    Trie *trie;
-    zval *trie_resource;
-    zend_string *filename;
-
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "rS",
-                &trie_resource, &filename) == FAILURE) {
-        RETURN_FALSE;
-    }
-    if (filename->len < 1) {
-        php_error_docref(NULL TSRMLS_CC, E_WARNING, "save path required");
-        RETURN_FALSE;
-    }
-    trie = (Trie *) zend_fetch_resource(Z_RES_P(trie_resource), PHP_TRIE_FILTER_RES_NAME, le_trie_filter);
-    if (trie_save(trie, filename->val)) {
-        RETURN_FALSE;
-    }
-    RETURN_TRUE;
-}
-/* }}} */
-
-/* {{{ proto bool trie_filter_free(int trie_tree_identifier)
-   Returns true, or false on error*/
-PHP_FUNCTION(trie_filter_free)
-{
-    Trie *trie;
-    zval *trie_resource;
-
-    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r", &trie_resource) == FAILURE) {
-        RETURN_FALSE;
-    }
-    trie = (Trie *) zend_fetch_resource(Z_RES_P(trie_resource), PHP_TRIE_FILTER_RES_NAME, le_trie_filter);
-    if (zend_list_delete(Z_RES_P(trie_resource)) == SUCCESS) {
-        RETURN_TRUE;
-    }
-    RETURN_FALSE;
-}
-/* }}} */
-
 /* {{{ proto resource trie_filter_init(string dict_file_path)
    Returns resource id, or FALSE on error*/
 PHP_FUNCTION(trie_filter_init)
 {
     zend_string *path;
+    char separator[32] = { 0 };
     
-    if(TRIE_FILTER_G(ptrie) == NULL) {
+    ++ TRIE_FILTER_G(initNum);
+    if(TRIE_FILTER_G(pTrie) == NULL) {
+        ++ TRIE_FILTER_G(newNum);
+        
         if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "S", &path) == FAILURE) {
             RETURN_NULL();
         }
         
-        TRIE_FILTER_G(ptrie) = trie_new_from_file(path->val);
-        if (!TRIE_FILTER_G(ptrie)) {
-            TRIE_FILTER_G(ptrie) = NULL;
+        TRIE_FILTER_G(pTrie) = trie_new_from_file(path->val);
+        if (!TRIE_FILTER_G(pTrie)) {
             php_error_docref(NULL TSRMLS_CC, E_WARNING, "Unable to load %s", path->val);
             RETURN_NULL();
         }
     }
     
-    RETURN_RES(zend_register_resource(TRIE_FILTER_G(ptrie), le_trie_filter));
-    //ZEND_REGISTER_RESOURCE(return_value, TRIE_FILTER_G(ptrie), le_trie_filter);
+    // php_printf("initNum:%d, newNum:%d \n", initNum, newNum);
+    php_sprintf(separator, "initNum:%d, newNum:%d \n", TRIE_FILTER_G(initNum), TRIE_FILTER_G(newNum));
+    php_error(E_WARNING, separator);
+    
+    RETURN_TRUE;
 }
 /* }}} */
 
